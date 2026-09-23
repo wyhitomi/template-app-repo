@@ -1,0 +1,7 @@
+default: true
+MD013: false   # line length
+MD024:
+  siblings_only: true
+MD033: false   # inline HTML (badges, <details>)
+MD041: false   # templates may not start with a heading
+MD060: false   # table pipe spacing style (too noisy for templates)

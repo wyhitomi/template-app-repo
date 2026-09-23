@@ -1,0 +1,8 @@
+# Single source of truth for tool versions (asdf / mise compatible).
+# CI workflows read this file, so bump versions here only.
+python 3.13
+terraform 1.16.3
+terragrunt 1.1.6
+tflint 0.64.0
+helm 4.3.0
+kubectl 1.37.0

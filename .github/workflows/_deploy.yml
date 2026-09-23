@@ -1,0 +1,78 @@
+# Reusable: deploy ONE immutable image tag to ONE environment, then smoke-test.
+# Bound to the GitHub Environment, so its protection rules (required
+# reviewers, wait timers, branch/tag restrictions) gate the deploy.
+#
+# Environment variables expected (Settings -> Environments -> <env>):
+#   DEPLOY_ROLE_ARN   IAM role trusted via OIDC for this environment
+#   CLUSTER_NAME      Kubernetes cluster name
+#   BASE_URL          Public URL, used for the environment link + smoke tests
+# Repository variable: AWS_REGION (default us-east-1)
+name: _deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev | stg | prd
+        type: string
+        required: true
+      image-tag:
+        description: Immutable image tag to deploy (e.g. sha-<commit> or v1.2.3)
+        type: string
+        required: true
+      ref:
+        description: Git ref to check out (chart + values version)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: deploy (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.BASE_URL }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENV: ${{ inputs.environment }}
+      IMAGE_TAG: ${{ inputs.image-tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: ./.github/actions/setup-tools
+        with:
+          python: "true"
+          helm: "true"
+
+      - uses: ./.github/actions/cloud-auth
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          cluster-name: ${{ vars.CLUSTER_NAME }}
+
+      - name: Deploy
+        run: make deploy ENV="$ENV" IMAGE_TAG="$IMAGE_TAG" IMAGE_REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
+
+      - name: Smoke test
+        if: vars.BASE_URL != ''
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+        run: make test-e2e BASE_URL="$BASE_URL"
+
+      - name: Roll back on failure
+        if: failure()
+        run: make rollback ENV="$ENV"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### ${ENV}: \`${IMAGE_TAG}\` - ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

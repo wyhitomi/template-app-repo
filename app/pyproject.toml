@@ -1,0 +1,17 @@
+[project]
+name = "template-app"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "SIM"]
+ignore = ["S310"] # urlopen on fixed local URLs in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]

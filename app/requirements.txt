@@ -1,0 +1,1 @@
+# Runtime dependencies (the sample app uses only the standard library).

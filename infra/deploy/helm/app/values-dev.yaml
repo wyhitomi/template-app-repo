@@ -1,0 +1,7 @@
+replicaCount: 1
+env:
+  APP_ENV: dev
+  LOG_LEVEL: debug
+ingress:
+  enabled: true
+  host: dev.template-app.example.com

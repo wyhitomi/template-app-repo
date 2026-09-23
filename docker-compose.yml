@@ -1,0 +1,43 @@
+# Local development & CI test stack.
+#   make up    -> build and start the stack, wait until healthy
+#   make down  -> tear it down
+# Post-merge suites (make test-integration/test-e2e/test-perf) hit BASE_URL.
+name: ${APP_NAME:-template-app}
+
+services:
+  app:
+    image: ${IMAGE:-template-app:local}
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      APP_PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Example dependency - uncomment when your service needs a database.
+  # db:
+  #   image: postgres:17-alpine
+  #   environment:
+  #     POSTGRES_USER: app
+  #     POSTGRES_PASSWORD: app
+  #     POSTGRES_DB: app
+  #   ports: ["5432:5432"]
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U app"]
+  #     interval: 5s
+  #     retries: 10

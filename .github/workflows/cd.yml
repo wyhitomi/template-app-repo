@@ -1,0 +1,117 @@
+# =============================================================================
+# CD - build once, promote the same immutable image through environments.
+#
+#   PR (same repo), CI green             -> dev  (image sha-<head sha>)
+#   main, CI + post-merge tests green    -> stg  (image sha-<commit>)
+#   tag v*.*.* on main                   -> prd  (sha image re-tagged as vX.Y.Z)
+#   workflow_dispatch                    -> any list of envs, promoted in order
+#
+# The "resolve" job emits a JSON matrix; "deploy" fans out over it with
+# max-parallel: 1 so multi-env promotions run in order and stop on failure.
+# =============================================================================
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI, Post-merge tests]
+    types: [completed]
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      environments:
+        description: Comma-separated, in promotion order (e.g. "dev,stg" or "prd")
+        required: true
+        default: dev
+      image-tag:
+        description: Image tag to deploy (default sha-<selected ref commit>)
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: resolve targets
+    runs-on: ubuntu-latest
+    # workflow_run fires for every CI/post-merge completion; keep only green runs.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: read
+      packages: write # re-tag image on release
+    outputs:
+      matrix: ${{ steps.r.outputs.matrix }}
+      image-tag: ${{ steps.r.outputs.image_tag }}
+      ref: ${{ steps.r.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: r
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          IN_ENVS: ${{ inputs.environments }}
+          IN_TAG: ${{ inputs.image-tag }}
+        run: |
+          envs='[]'; sha="$GITHUB_SHA"; tag=""
+          case "$EVENT" in
+            workflow_run)
+              sha="$RUN_SHA"
+              if [ "$RUN_NAME" = "CI" ] && [ "$RUN_EVENT" = "pull_request" ] \
+                 && [ "$RUN_REPO" = "$GITHUB_REPOSITORY" ]; then
+                envs='["dev"]'
+              elif [ "$RUN_NAME" = "Post-merge tests" ] && [ "$RUN_BRANCH" = "main" ]; then
+                envs='["stg"]'
+              fi ;;
+            push) # release tag
+              git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+                || { echo "::error::Release tag must point at a commit on main"; exit 1; }
+              envs='["prd"]'
+              tag="${GITHUB_REF_NAME}" ;;
+            workflow_dispatch)
+              envs=$(jq -cn --arg e "$IN_ENVS" '$e | split(",") | map(gsub("\\s";"")) | map(select(length>0))')
+              jq -e 'all(.[]; IN("dev","stg","prd"))' <<<"$envs" >/dev/null \
+                || { echo "::error::environments must be dev, stg and/or prd"; exit 1; }
+              tag="$IN_TAG" ;;
+          esac
+          echo "matrix=$(jq -cn --argjson e "$envs" '{environment: $e}')" | tee -a "$GITHUB_OUTPUT"
+          echo "image_tag=${tag:-sha-$sha}" | tee -a "$GITHUB_OUTPUT"
+          echo "ref=${sha}" | tee -a "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${sha}" >> "$GITHUB_OUTPUT"
+
+      # Releases never rebuild: the tested sha image gets the semver tag.
+      - name: Promote image to release tag
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SRC: ${{ steps.r.outputs.sha_tag }}
+          DST: ${{ steps.r.outputs.image_tag }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools inspect "${image}:${SRC}" >/dev/null \
+            || { echo "::error::${image}:${SRC} not found - was CI green on main for this commit?"; exit 1; }
+          docker buildx imagetools create -t "${image}:${DST}" -t "${image}:latest" "${image}:${SRC}"
+
+  deploy:
+    needs: resolve
+    if: fromJSON(needs.resolve.outputs.matrix).environment[0] != null
+    strategy:
+      max-parallel: 1 # promote sequentially, in the given order
+      fail-fast: true # a failed env stops the promotion chain
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: ${{ matrix.environment }}
+      image-tag: ${{ needs.resolve.outputs.image-tag }}
+      ref: ${{ needs.resolve.outputs.ref }}
+    secrets: inherit

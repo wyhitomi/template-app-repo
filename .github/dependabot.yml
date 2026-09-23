@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+    commit-message: { prefix: "ci" }
+
+  - package-ecosystem: docker
+    directory: /app
+    schedule: { interval: weekly }
+    commit-message: { prefix: "build" }
+
+  - package-ecosystem: pip
+    directory: /app
+    schedule: { interval: weekly }
+    commit-message: { prefix: "build" }
+
+  - package-ecosystem: terraform
+    directories: ["/infra/terraform/modules/*"]
+    schedule: { interval: weekly }
+    commit-message: { prefix: "infra" }
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule: { interval: monthly }
+    commit-message: { prefix: "chore" }

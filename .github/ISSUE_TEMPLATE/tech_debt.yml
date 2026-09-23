@@ -1,0 +1,22 @@
+name: 🧹 Tech debt / chore
+description: Refactoring, upgrades, cleanup or operational work.
+title: "chore: "
+labels: [tech-debt]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What is the current state and why is it a problem?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk / cost of not doing it

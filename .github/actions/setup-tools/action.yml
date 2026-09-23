@@ -1,0 +1,62 @@
+name: Setup tools
+description: Install pinned toolchain versions read from .tool-versions.
+inputs:
+  python:
+    description: Install Python
+    default: "false"
+  iac:
+    description: Install terraform, terragrunt and tflint
+    default: "false"
+  helm:
+    description: Install helm and kubectl
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Read .tool-versions
+      id: v
+      shell: bash
+      run: |
+        for tool in python terraform terragrunt tflint helm kubectl; do
+          echo "${tool}=$(awk -v t="$tool" '$1==t {print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+        done
+
+    - if: inputs.python == 'true'
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ steps.v.outputs.python }}
+
+    - if: inputs.iac == 'true'
+      uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: ${{ steps.v.outputs.terraform }}
+        terraform_wrapper: false
+
+    - if: inputs.iac == 'true'
+      name: Install terragrunt
+      shell: bash
+      env:
+        TG_VERSION: ${{ steps.v.outputs.terragrunt }}
+      run: |
+        base="https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}"
+        cd "$RUNNER_TEMP"
+        curl -fsSLO "${base}/terragrunt_linux_amd64"
+        curl -fsSLO "${base}/SHA256SUMS"
+        grep ' terragrunt_linux_amd64$' SHA256SUMS | sha256sum -c -
+        sudo install -m 0755 terragrunt_linux_amd64 /usr/local/bin/terragrunt
+        terragrunt --version
+
+    - if: inputs.iac == 'true'
+      uses: terraform-linters/setup-tflint@v6
+      with:
+        tflint_version: v${{ steps.v.outputs.tflint }}
+
+    - if: inputs.helm == 'true'
+      uses: azure/setup-helm@v5
+      with:
+        version: v${{ steps.v.outputs.helm }}
+
+    - if: inputs.helm == 'true'
+      uses: azure/setup-kubectl@v5
+      with:
+        version: v${{ steps.v.outputs.kubectl }}

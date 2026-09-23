@@ -1,0 +1,11 @@
+# Default owners for everything. Replace with your teams/users.
+*                       @OWNER/app-team
+
+# Platform-owned areas require platform review.
+/infra/                 @OWNER/platform-team
+/.github/workflows/     @OWNER/platform-team
+/.github/actions/       @OWNER/platform-team
+
+# Architecture decisions need architecture review.
+/docs/adr/              @OWNER/architects
+/docs/rfc/              @OWNER/architects

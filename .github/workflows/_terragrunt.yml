@@ -1,0 +1,78 @@
+# Reusable: run terragrunt plan or apply for ONE environment.
+# - plan : no GitHub Environment, assumes the read-only plan role
+#          from repo variable TF_PLAN_ROLE_ARNS (JSON: {"dev": "arn:...", ...}).
+# - apply: bound to the GitHub Environment (protection rules / approvals),
+#          assumes the environment variable TF_APPLY_ROLE_ARN.
+name: _terragrunt
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev | stg | prd
+        type: string
+        required: true
+      command:
+        description: plan | apply
+        type: string
+        required: true
+      ref:
+        description: Git ref to check out
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terragrunt:
+    name: ${{ inputs.command }} (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Empty string = no Environment binding (plans run without approval gates).
+    environment: ${{ inputs.command == 'apply' && inputs.environment || '' }}
+    concurrency:
+      # Never run two applies/plans against the same state at once.
+      group: terragrunt-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      TG_NON_INTERACTIVE: "true"
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: ./.github/actions/setup-tools
+        with:
+          iac: "true"
+
+      - uses: ./.github/actions/cloud-auth
+        with:
+          role-to-assume: ${{ inputs.command == 'apply' && vars.TF_APPLY_ROLE_ARN || fromJSON(vars.TF_PLAN_ROLE_ARNS || '{}')[inputs.environment] }}
+          region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: terragrunt ${{ inputs.command }}
+        env:
+          ENV: ${{ inputs.environment }}
+          CMD: ${{ inputs.command }}
+        run: |
+          set -o pipefail
+          make "tf-${CMD}" ENV="${ENV}" 2>&1 | tee "${RUNNER_TEMP}/tg.log"
+
+      - name: Job summary
+        if: always()
+        env:
+          ENV: ${{ inputs.environment }}
+          CMD: ${{ inputs.command }}
+        run: |
+          {
+            echo "### terragrunt ${CMD} - \`${ENV}\`"
+            echo '<details><summary>Output</summary>'
+            echo
+            echo '```'
+            tail -c 60000 "${RUNNER_TEMP}/tg.log" 2>/dev/null || echo "no output"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"

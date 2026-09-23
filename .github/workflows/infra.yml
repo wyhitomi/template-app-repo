@@ -1,0 +1,160 @@
+# =============================================================================
+# Infrastructure - Terraform/Terragrunt
+#   pull_request (infra changes) -> dev   (plan + apply)
+#   push to main (infra changes) -> stg   (plan + apply)
+#   tag v*.*.*                   -> prd   (plan + apply, gated by Environment approval)
+#   workflow_dispatch            -> chosen env / command
+# =============================================================================
+name: Infrastructure
+
+on:
+  pull_request:
+    paths:
+      - infra/terraform/**
+      - infra/live/**
+      - .tool-versions
+      - .tflint.hcl
+      - .github/workflows/infra.yml
+      - .github/workflows/_terragrunt.yml
+      - .github/actions/**
+  push:
+    branches: [main]
+    tags: ["v*.*.*"] # path filters are not evaluated for tags
+    paths:
+      - infra/terraform/**
+      - infra/live/**
+      - .tool-versions
+      - .tflint.hcl
+      - .github/workflows/infra.yml
+      - .github/workflows/_terragrunt.yml
+      - .github/actions/**
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, stg, prd]
+        required: true
+      command:
+        description: plan only, or plan + apply
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static checks: no cloud credentials needed.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-tools
+        with:
+          iac: "true"
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff infra/terraform
+
+      - name: terragrunt hcl fmt
+        working-directory: infra/live
+        run: terragrunt hcl fmt --check --diff
+
+      - name: tflint + terraform validate (modules)
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          for m in infra/terraform/modules/*/; do
+            echo "::group::${m}"
+            terraform -chdir="$m" init -backend=false -input=false
+            terraform -chdir="$m" validate
+            tflint --chdir="$m" --config "$PWD/.tflint.hcl"
+            echo "::endgroup::"
+          done
+
+      - name: IaC security scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+  # ---------------------------------------------------------------------------
+  # Decide which environment(s) this event targets.
+  # ---------------------------------------------------------------------------
+  resolve:
+    name: resolve targets
+    runs-on: ubuntu-latest
+    outputs:
+      envs: ${{ steps.r.outputs.envs }}
+      apply: ${{ steps.r.outputs.apply }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: r
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          IN_ENV: ${{ inputs.environment }}
+          IN_CMD: ${{ inputs.command }}
+        run: |
+          apply=true
+          case "$EVENT" in
+            pull_request)
+              # Fork PRs have no access to secrets/OIDC: static checks only.
+              if [ "$SAME_REPO" = "true" ]; then envs='["dev"]'; else envs='[]'; fi ;;
+            push)
+              if [[ "$REF" == refs/tags/v* ]]; then
+                # Only release tags that point at a commit already on main.
+                git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+                  || { echo "::error::Tag is not on main"; exit 1; }
+                envs='["prd"]'
+              else
+                envs='["stg"]'
+              fi ;;
+            workflow_dispatch)
+              envs="[\"${IN_ENV}\"]"
+              [ "$IN_CMD" = "apply" ] || apply=false ;;
+          esac
+          echo "envs=${envs}"   | tee -a "$GITHUB_OUTPUT"
+          echo "apply=${apply}" | tee -a "$GITHUB_OUTPUT"
+
+  plan:
+    needs: [validate, resolve]
+    if: needs.resolve.outputs.envs != '[]'
+    strategy:
+      fail-fast: true
+      matrix:
+        environment: ${{ fromJSON(needs.resolve.outputs.envs) }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_terragrunt.yml
+    with:
+      environment: ${{ matrix.environment }}
+      command: plan
+    secrets: inherit
+
+  apply:
+    needs: [resolve, plan]
+    if: needs.resolve.outputs.apply == 'true'
+    strategy:
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(needs.resolve.outputs.envs) }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_terragrunt.yml
+    with:
+      environment: ${{ matrix.environment }}
+      command: apply
+    secrets: inherit
