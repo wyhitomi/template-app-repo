@@ -27,5 +27,12 @@ make up        # local stack
 
 ## Releases
 
-Maintainers tag `vMAJOR.MINOR.PATCH` on `main` following [SemVer](https://semver.org).
-The tag promotes the already-tested image to production after approval.
+Releases are automated by [release-please](https://github.com/googleapis/release-please)
+(`.github/workflows/release-please.yml`). Every merge to `main` opens or updates a
+**Release PR** with the next [SemVer](https://semver.org) version and the generated
+`CHANGELOG.md`, derived from commit types: `feat` → minor, `fix`/`perf` → patch,
+`!` or `BREAKING CHANGE:` → major (while `0.x`, breaking changes bump the minor).
+
+Merging the Release PR tags `vMAJOR.MINOR.PATCH` and creates the GitHub Release; the tag
+promotes the already-tested image to production after approval. Do not create `v*` tags
+or edit released `CHANGELOG.md` sections by hand.

@@ -17,3 +17,4 @@ supersedes the old one and update the old one's status.
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted | 2026-09-23 |
 | [0002](0002-build-once-promote-immutable-images.md) | Build once, promote immutable images | Accepted | 2026-09-23 |
 | [0003](0003-terragrunt-per-environment-layout.md) | Terragrunt per-environment layout | Accepted | 2026-09-23 |
+| [0004](0004-automate-releases-with-release-please.md) | Automate releases with release-please | Accepted | 2026-09-25 |
