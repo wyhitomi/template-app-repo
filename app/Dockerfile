@@ -2,7 +2,7 @@
 # Build context is the repo root (see docker-compose.yml / Makefile).
 
 # --- deps: resolve third-party packages with pip ------------------------------
-FROM python:3.13-slim AS deps
+FROM python:3.14-slim AS deps
 
 WORKDIR /build
 COPY app/requirements.txt ./
@@ -10,7 +10,7 @@ RUN mkdir -p /deps \
  && pip install --no-cache-dir --target /deps -r requirements.txt
 
 # --- runtime: no package manager, non-root ------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ARG VERSION=dev
 ARG GIT_SHA=unknown
