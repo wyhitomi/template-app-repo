@@ -41,6 +41,9 @@ jobs:
       - name: Run hooks
         env:
           SKIP: no-commit-to-branch # CI runs on main after merge
+          # Authenticates `tflint --init` plugin downloads; anonymous
+          # GitHub API calls hit the shared-runner rate limit (403).
+          GITHUB_TOKEN: ${{ github.token }}
         run: make lint
 
   test:
