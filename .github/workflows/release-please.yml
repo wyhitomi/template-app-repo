@@ -1,0 +1,65 @@
+# =============================================================================
+# Release - automated versioning with release-please.
+#
+#   merge to main      -> open/update the Release PR (next SemVer + CHANGELOG)
+#   merge Release PR   -> tag vX.Y.Z + GitHub Release
+#                         -> cd.yml promotes the sha image and deploys prd
+#                         -> infra.yml plans + applies prd
+#
+# Versions are derived from Conventional Commits (feat -> minor, fix -> patch,
+# "!" / BREAKING CHANGE -> major). Config: release-please-config.json and
+# .release-please-manifest.json.
+#
+# Uses a GitHub App token: tags and PRs created with GITHUB_TOKEN do NOT
+# trigger other workflows, so neither CI (ci-ok) on the Release PR nor the prd
+# promotion on the tag would run.
+#   Repository variable: RELEASE_APP_ID
+#   Repository secret:   RELEASE_APP_PRIVATE_KEY
+#   App permissions:     Contents, Pull requests, Issues (labels) - read/write
+# =============================================================================
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Summary
+        env:
+          CREATED: ${{ steps.release.outputs.release_created }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          PR: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+        run: |
+          if [ "$CREATED" = "true" ]; then
+            echo "### Released \`${TAG}\` - prd promotion triggered" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -n "$PR" ]; then
+            echo "### Release PR #${PR} updated" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### No releasable changes" >> "$GITHUB_STEP_SUMMARY"
+          fi

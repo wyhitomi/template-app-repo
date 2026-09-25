@@ -82,7 +82,9 @@ make help    # every available target
 2. Commit using [Conventional Commits](https://www.conventionalcommits.org) (enforced by a hook).
 3. Open a PR; CI runs and a green build auto-deploys to **dev**.
 4. After review + merge, post-merge suites run and the build is promoted to **stg**.
-5. Tag a release (`git tag v1.2.3 && git push --tags`) to promote to **prd** (requires approval).
+5. Every merge updates the **Release PR** (next version + changelog, via
+   [release-please](https://github.com/googleapis/release-please)). Merging it tags
+   `vX.Y.Z` and promotes to **prd** (requires approval).
 
 Significant decisions → [ADR](docs/adr/). Larger proposals → [RFC](docs/rfc/).
 
@@ -101,8 +103,8 @@ Significant decisions → [ADR](docs/adr/). Larger proposals → [RFC](docs/rfc/
 | Event | Infra (`infra.yml`) | App (`cd.yml`) |
 |-------|---------------------|----------------|
 | Pull request | plan + apply **dev** | deploy **dev** |
-| Merge to `main` | plan + apply **stg** | post-merge tests → deploy **stg** |
-| Tag `vX.Y.Z` | plan + apply **prd** (approval) | promote image → deploy **prd** (approval) |
+| Merge to `main` | plan + apply **stg** | post-merge tests → deploy **stg**; Release PR updated |
+| Merge Release PR → tag `vX.Y.Z` | plan + apply **prd** (approval) | promote image → deploy **prd** (approval) |
 
 Details, required secrets/variables and diagrams: [delivery pipeline](docs/architecture/delivery-pipeline.md).
 
@@ -142,7 +144,10 @@ After creating a repo from this template:
 3. Create GitHub Environments `dev`, `stg`, `prd` and variables as listed in the [delivery pipeline doc](docs/architecture/delivery-pipeline.md#required-github-configuration).
 4. Set account IDs/regions in `infra/live/<env>/env.hcl` and create the state buckets.
 5. Protect `main` (required check: `ci-ok`) and restrict `v*` tags.
-6. Update `CODEOWNERS`, this README and `docs/architecture/README.md`.
+6. Create a GitHub App for releases (Contents, Pull requests, Issues: read/write), install it on
+   the repo, set variable `RELEASE_APP_ID` and secret `RELEASE_APP_PRIVATE_KEY`, and allow it to
+   create `v*` tags (see [delivery pipeline](docs/architecture/delivery-pipeline.md#required-github-configuration)).
+7. Update `CODEOWNERS`, this README and `docs/architecture/README.md`.
 
 ## Contributing
 
