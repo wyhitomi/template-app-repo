@@ -1,5 +1,15 @@
 # syntax=docker/dockerfile:1.7
 # Build context is the repo root (see docker-compose.yml / Makefile).
+
+# --- deps: resolve third-party packages with pip ------------------------------
+FROM python:3.13-slim AS deps
+
+WORKDIR /build
+COPY app/requirements.txt ./
+RUN mkdir -p /deps \
+ && pip install --no-cache-dir --target /deps -r requirements.txt
+
+# --- runtime: no package manager, non-root ------------------------------------
 FROM python:3.13-slim AS runtime
 
 ARG VERSION=dev
@@ -9,16 +19,19 @@ LABEL org.opencontainers.image.version="${VERSION}" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src \
+    PYTHONPATH=/app/src:/app/deps \
     APP_PORT=8080
 
-WORKDIR /app
-COPY app/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# pip is not needed at runtime and vendors its own libraries (msgpack,
+# setuptools/pkg_resources) that scanners flag; drop it with its bundled wheel.
+RUN python -m pip uninstall -y pip \
+ && rm -rf /usr/local/lib/python3*/ensurepip/_bundled \
+ && useradd --system --uid 10001 --no-create-home appuser
 
+WORKDIR /app
+COPY --from=deps /deps ./deps
 COPY app/src ./src
 
-RUN useradd --system --uid 10001 --no-create-home appuser
 USER 10001
 
 EXPOSE 8080
